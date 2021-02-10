@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:v-on="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="UTF-8">
+    <title>Sec-killing</title>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js" integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.1.8/vue.min.js"></script>
+</head>
+<body>
+<div id="app">
+    <h1>{{ headline }}</h1>
+    <hr/>
+    <div style="display: flex; align-items: center;">
+        <p>Hello</p>
+        <p v-if="this.user && this.user.name">{{ ', ' + this.user.name }}</p>
+        <p>!</p>
+        <button id="sign-out-btn" v-if="this.user" style="height: 20px">Sign Out</button>
+    </div>
+    <hr/>
+    <div v-if="!this.user || !this.user.name">
+        <form id="register-form">
+            <div>
+                <span>username: </span><input name="username" type="text" required/>
+            </div>
+            <div>
+                <span>email: </span><input name="email" type="email" required/>
+            </div>
+            <div>
+                <span>password: </span><input name="password" type="password" required/>
+            </div>
+            <input value="Sign Up" type="submit"/>
+        </form>
+
+        <hr/>
+        <form id="login-form" >
+            <div>
+                <span>username: </span><input name="username" type="text"/>
+            </div>
+            <div>
+                <span>password: </span><input name="password" type="password"/>
+            </div>
+            <input value="Sign In" type="submit"/>
+        </form>
+
+        <hr/>
+    </div>
+    <h1>Products</h1>
+    <hr/>
+
+    <form id="order-form" v-if="this.user.name">
+        <div v-for="item in products">
+            <div>
+                <span>Product Name: </span>
+                <span>{{ item.name }}</span>
+            </div>
+            <div>
+                <span>Start Time: </span>
+                <span>{{ item.startTime }}</span>
+            </div>
+            <div>
+                <span>End Time: </span>
+                <span>{{ item.endTime }}</span>
+            </div>
+            <div>
+                <span>Remain: </span>
+                <span>{{ item.stock }}</span>
+            </div>
+            <button v-on:click="submitOrder($event, item.id)">Buy Now</button>
+            <hr/>
+        </div>
+    </form>
+    <div v-else>Nothing...</div>
+
+    <h1>Orders</h1>
+    <hr/>
+    <div v-for="item in orders">
+        <div>
+            <span>Product Name: </span>
+            <span>{{ item.name }}</span>
+        </div>
+        <div>
+            <span>State: </span>
+            <span>{{ item.state == 0 ? 'Not Paid' : 'Paid' }}</span>
+        </div>
+        <div>
+            <span>Created Time: </span>
+            <span>{{ item.createdTime }}</span>
+        </div>
+        <button v-on:click="cancelOrder($event, item.id)">Cancel</button>
+        <hr/>
+    </div>
+</div>
+
+<script>
+    new Vue({
+        el: '#app',
+        data: {
+            headline:'Welcome to My Seckilling Webpage!',
+            user: {},
+            products: [],
+            orders: [],
+        },
+        mounted: async function () {
+            let vm = this;
+            let ticket = $.cookie("ticket") ? JSON.parse($.cookie("ticket")) : "";
+            if (ticket && ticket.username) {
+                let username = ticket.username;
+                let sessionId = ticket.sessionId;
+                vm.user = await vm.doAjax('GET', '/customer', {
+                    username,
+                    sessionId,
+                });
+                vm.user.sessionId = sessionId;
+                console.log(vm.user.id);
+                vm.orders = await vm.doAjax('GET', '/order', {
+                    customer: vm.user.id,
+                });
+                console.log("orders");
+                console.log(vm.orders);
+                for (let order of vm.orders) {
+                    // let product = await vm.doAjax('GET', '/product/' + order.productId, {});
+                    // order.name = product.name;
+                }
+                console.log("orders: ");
+                console.log(vm.orders);
+            }
+            $("#register-form").submit(async function (event) {
+                event.preventDefault();
+                let values = vm.parseFormValues('register-form');
+                console.log(values);
+                let username = values.username;
+                let password = values.password;
+                let email = values.email;
+                vm.user = await vm.doAjax('POST', '/register', JSON.stringify({
+                    username,
+                    email,
+                    password,
+                }));
+                console.log(vm.user);
+                location.reload();
+            });
+            $("#login-form").submit(async function (event) {
+                event.preventDefault();
+                let values = vm.parseFormValues('login-form');
+                console.log(values);
+                let username = values.username;
+                let password = values.password;
+                let ticket = await vm.doAjax('POST', '/login', JSON.stringify({
+                    username,
+                    password,
+                }));
+                console.log(ticket);
+                $.cookie("ticket", JSON.stringify(ticket), {expires: 1});
+                location.reload();
+            });
+            $('#sign-out-btn').click(async function () {
+                console.log(vm.user);
+                if (!vm.user) {
+                    return;
+                }
+                console.log('signing out: ' + JSON.stringify(vm.user));
+                let username = vm.user.name;
+                let sessionId = vm.user.sessionId;
+                if (!username || !sessionId) {
+                    return;
+                }
+                await vm.doAjax('POST', '/logout', JSON.stringify({
+                    username,
+                    sessionId,
+                }));
+                $.cookie("ticket", '');
+                vm.user = {};
+                location.reload();
+            });
+            vm.products = await this.doAjax('GET', '/product', {});
+            console.log(vm.products);
+            console.log(vm.products.length);
+        },
+        methods: {
+            parseFormValues: function(formId) {
+                let values = {};
+                for (let pair of $('#' + formId).serializeArray()) {
+                    values[pair.name] = pair.value;
+                }
+                return values;
+            },
+            doAjax: async function(type, url, data) {
+                let result;
+                try {
+                    let options = {
+                        url,
+                        type,
+                        data,
+                    };
+                if (type.toUpperCase() === 'POST') {
+                    options = {
+                        ...options,
+                        dataType: 'json',
+                        contentType: 'application/json',
+                        processData: false,
+                    };
+                }
+                result = await $.ajax(options);
+                return result;
+            } catch (error) {
+                console.error(error.responseText);
+            }
+        },
+        submitOrder: async function (event, product) {
+            event.preventDefault();
+            let orderUri = await this.doAjax('GET', '/product/uri', {
+                id: product,
+            });
+            let customer = this.user.id;
+            console.log(orderUri);
+            if (orderUri) {
+                let order = await this.doAjax('POST', '/order/' + orderUri, JSON.stringify({
+                    customer,
+                    product,
+                }));
+                alert("Purchase Done!");
+            }
+            location.reload();
+            },
+            cancelOrder: function(event, id) {
+                let username = this.user.name;
+                let sessionId = this.user.sessionId;
+                if (!username || !sessionId) {
+                    return;
+                }
+                $.ajax({
+                    data: {
+                        id,
+                        username,
+                        sessionId,
+                    },
+                    success: function(data){
+                        console.log(data);
+                        alert("Cancel Done!");
+                        location.reload();
+                    },
+                    error: function(data){
+                        console.log(data.responseText);
+                    },
+                    type: 'DELETE',
+                    url: '/order'
+                });
+            },
+        },
+    })
+</script>
+</body>
+</html>
